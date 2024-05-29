@@ -40,7 +40,7 @@ class TransformerBlock(hk.Module):
         self.init_scale = init_scale
         self.widening_factor = widening_factor
 
-    def __call__(self, hiddens, inputs):
+    def __call__(self, hiddens, inputs, dataset): # added dataset as input to the transformer block
         w_init = hk.initializers.VarianceScaling(self.init_scale)
 
         inputs_embedding = hk.Linear(
@@ -48,17 +48,26 @@ class TransformerBlock(hk.Module):
             w_init=w_init,
             name='linear_1'
         )(inputs)
+        # compute dataset embeddings 
+        additional_data_embedding = hk.Linear(self.embedding_size, w_init=w_init, name='linear_additional_dataset')(dataset)
+        
+        # Combine primary and additional embeddings
+        combined_embeddings = jnp.concatenate((inputs_embedding, additional_data_embedding, hiddens), axis=-1)
+
+
         h_norm = hk.LayerNorm(
             axis=-1,
             create_scale=True,
             create_offset=True,
             name='layernorm_1'
-        )(jnp.concatenate((inputs_embedding, hiddens), axis=-1))
+        )(jnp.concatenate((combined_embeddings, hiddens), axis=-1)) # combined_embeddings added
+
         h_attn = LinearMultiHeadAttention(
             num_heads=self.num_heads,
             key_size=self.key_size,
             w_init_scale=self.init_scale
         )(h_norm, h_norm, h_norm, mask=None)
+        
         hiddens = hiddens + h_attn
 
         inputs_embedding = hk.Linear(
@@ -66,17 +75,22 @@ class TransformerBlock(hk.Module):
             w_init=w_init,
             name='linear_2'
         )(inputs)
+
         h_norm = hk.LayerNorm(
             axis=-1,
             create_scale=True,
             create_offset=True,
             name='layernorm_2'
-        )(jnp.concatenate((inputs_embedding, hiddens), axis=-1))
+        )(jnp.concatenate((combined_embeddings, hiddens), axis=-1)) ## added combined embedding
+
         h_dense = DenseBlock(
             init_scale=self.init_scale,
             widening_factor=self.widening_factor,
             output_size=self.num_heads * self.key_size
         )(h_norm)
+
         hiddens = hiddens + h_dense
 
         return hiddens
+
+
